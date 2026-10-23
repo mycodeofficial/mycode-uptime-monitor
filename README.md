@@ -3,9 +3,9 @@
 Comprueba MyCode y Daroka desde los ejecutores de GitHub, aunque el servidor de
 las webs esté apagado o sin Internet. No ejecuta comandos en ese servidor.
 
-- Programado cada cinco minutos, con dos intentos por web y ejecución manual.
-- Envía a Telegram las caídas y recuperaciones en español, conservando grupos y temas.
-- Si ambas webs fallan, indica un posible apagado o fallo de Internet; no confunde esa sospecha con un diagnóstico confirmado.
+- Programado cada cinco minutos, con tres intentos por web; confirma caídas tras dos ejecuciones consecutivas fallidas.
+- Envía a Telegram las caídas y recuperaciones en español, solo al privado del propietario, una vez por cambio confirmado.
+- No diagnostica apagados ni reinicios a partir de fallos HTTP. El bot local detecta los reinicios mediante el identificador de arranque.
 - El estado y los avisos pendientes se conservan en `.monitor-state.json`.
 - Una actualización diaria del estado mantiene actividad en el repositorio.
 - No utiliza `getUpdates` ni webhooks: funciona junto al bot de consultas.

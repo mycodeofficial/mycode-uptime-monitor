@@ -20,7 +20,7 @@ def utcnow():
 
 def probe(item):
     name, url = item
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             request = urllib.request.Request(url + '/?monitor=' + str(time.time_ns()), headers={
                 'User-Agent': 'MyCode-External-Monitor/1.0', 'Cache-Control': 'no-cache'})
@@ -32,58 +32,49 @@ def probe(item):
             result = {'ok': False, 'code': error.code}
         except Exception:
             result = {'ok': False, 'error': 'No se pudo conectar o validar HTTPS'}
-        if attempt == 0:
-            time.sleep(2)
+        if attempt < 2:
+            time.sleep(10)
     return name, result
 
 
 def transition(previous, readings, now):
-    """Sin red: cambios con cola persistente y duración de las caídas."""
+    """Una alerta por web tras dos ejecuciones fallidas, tres intentos por ejecución."""
     state = copy.deepcopy(previous)
     state.setdefault('services', {})
     state.setdefault('pending', [])
     state.setdefault('next_id', 1)
-    checked = now.isoformat()
-    changes = False
+    state.setdefault('candidates', {})
     for name, reading in readings.items():
         old = state['services'].get(name)
+        count = 0 if reading['ok'] else min(2, state['candidates'].get(name, 0) + 1)
+        state['candidates'][name] = count
+        # Cancelar avisos de caída pendientes si la web ya responde.
+        if reading['ok']:
+            state['pending'] = [n for n in state['pending']
+                                if not (n.get('service') == name and n.get('kind') == 'down')]
+        if not reading['ok'] and count < 2:
+            continue
         if old is None or old['ok'] != reading['ok']:
-            changes = True
+            message = None
             if not reading['ok']:
-                message = '🔴 Vigilante externo · ' + name + ' no está disponible tras dos intentos.'
-                message += '\n' + SITES[name]
+                message = ('🔴 Vigilante externo · ' + name
+                           + ' no responde tras dos comprobaciones consecutivas desde GitHub, '
+                           'con tres intentos cada una.\n' + SITES[name])
                 if 'code' in reading:
                     message += '\nHTTP ' + str(reading['code'])
             elif old and not old['ok']:
-                started = datetime.datetime.fromisoformat(old['since'])
-                minutes = max(0, int((now - started).total_seconds() // 60))
-                message = '✅ Vigilante externo · ' + name + ' vuelve a responder.' + f'\nDuración aproximada: {minutes} min.'
-            else:
-                message = None
+                minutes = max(0, int((now - datetime.datetime.fromisoformat(old['since'])).total_seconds() // 60))
+                message = '✅ Vigilante externo · ' + name + ' vuelve a responder.\nDuración desde la confirmación: ' + str(minutes) + ' min.'
             if message:
-                state['pending'].append({'id': state['next_id'], 'text': message, 'delivered': []})
+                state['pending'].append({'id': state['next_id'], 'text': message,
+                                         'service': name, 'kind': 'up' if reading['ok'] else 'down', 'delivered': []})
                 state['next_id'] += 1
-            state['services'][name] = {**reading, 'since': checked}
-    if readings and all(not row['ok'] for row in readings.values()):
-        if not previous.get('server_unreachable', False):
-            state['pending'].append({'id': state['next_id'], 'text':
-                '⚠️ Vigilante externo · Las dos webs están inaccesibles. Puede haberse apagado el servidor o perdido su conexión a Internet. Este aviso se envía desde GitHub.', 'delivered': []})
-            state['next_id'] += 1
-            changes = True
-        state['server_unreachable'] = True
-    else:
-        if previous.get('server_unreachable', False):
-            state['pending'].append({'id': state['next_id'], 'text':
-                '✅ Vigilante externo · El servidor vuelve a responder desde Internet; al menos una de las webs está disponible.', 'delivered': []})
-            state['next_id'] += 1
-            changes = True
-        state['server_unreachable'] = False
-    # Una actividad diaria evita la suspensión del cron por inactividad del repositorio.
-    if previous.get('last_checked', '')[:10] != checked[:10]:
-        changes = True
-    if changes:
-        state['last_checked'] = checked
-    return state, changes
+            state['services'][name] = {**reading, 'since': now.isoformat()}
+    # Una fecha antigua describe el monitor, nunca una caída del servidor.
+    state['server_unreachable'] = False
+    if previous.get('last_checked', '')[:10] != now.isoformat()[:10]:
+        state['last_checked'] = now.isoformat()
+    return state, state != previous
 
 
 class GitHubState:
