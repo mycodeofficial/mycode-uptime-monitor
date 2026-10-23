@@ -11,16 +11,7 @@
       "since": "2026-10-23T06:53:04.813824+00:00"
     }
   },
-  "pending": [
-    {
-      "id": 1,
-      "text": "✅ Vigilancia externa MyCode activada. MyCode y Daroka responden correctamente desde GitHub. Comprobaciones programadas cada cinco minutos; puede haber retrasos. Recibirás los avisos de caída y recuperación aunque este ordenador esté apagado.",
-      "delivered": [
-        0,
-        1
-      ]
-    }
-  ],
+  "pending": [],
   "next_id": 2,
   "server_unreachable": false,
   "last_checked": "2026-10-23T06:53:04.813824+00:00"
