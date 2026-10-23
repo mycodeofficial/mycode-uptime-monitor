@@ -21,3 +21,22 @@ no se garantiza un aviso exactamente a los cinco minutos.
 
 Referencias: [programación de Actions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)
 y [uso gratuito](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+
+## Comprobaciones funcionales y confirmación geográfica
+
+MyCode: comprobar el contenido de la portada y la validación de una petición
+vacía al formulario (no se envía correo ni se prueban entregas de correo).
+Daroka: comprobar portada, carta y /api/health, que lee las tablas públicas
+necesarias para la carta sin devolver datos ni escribir en ellas.
+
+Ante un fallo repetido se pide una comprobación HTTP a Globalping desde
+Alemania y Estados Unidos. Se requieren errores concluyentes de ambos países;
+un éxito, resultados ausentes, bloqueos 401/403, límites 429 o discrepancias
+no confirman una caída. La API y las sondas son dependencias externas: si no
+aportan evidencia suficiente se conserva el estado anterior, sin inventar una
+caída ni una recuperación. Los resultados se limitan a los dominios públicos.
+Contrato: https://github.com/jsdelivr/globalping/blob/master/public/v1/spec.yaml
+
+Se exigen dos ejecuciones fallidas separadas entre uno y treinta minutos.
+Un retraso mayor empieza una confirmación nueva. Los avisos usan nombres
+comprensibles, hora del primer fallo y ubicaciones que lo confirman.

@@ -6,11 +6,13 @@ import copy
 import datetime
 import json
 import os
+from zoneinfo import ZoneInfo
 import time
 import urllib.error
 import urllib.request
+from functional_checks import SITES, check
+from second_opinion import corroborate
 
-SITES = {'MyCode': 'https://mycodeoficial.com', 'Daroka': 'https://daroka.mycodeoficial.com'}
 STATE_FILE = '.monitor-state.json'
 
 
@@ -21,19 +23,16 @@ def utcnow():
 def probe(item):
     name, url = item
     for attempt in range(3):
-        try:
-            request = urllib.request.Request(url + '/?monitor=' + str(time.time_ns()), headers={
-                'User-Agent': 'MyCode-External-Monitor/1.0', 'Cache-Control': 'no-cache'})
-            with urllib.request.urlopen(request, timeout=12) as response:
-                if 200 <= response.status < 400:
-                    return name, {'ok': True, 'code': response.status}
-                result = {'ok': False, 'code': response.status}
-        except urllib.error.HTTPError as error:
-            result = {'ok': False, 'code': error.code}
-        except Exception:
-            result = {'ok': False, 'error': 'No se pudo conectar o validar HTTPS'}
+        result = check(name, url)
+        if result['ok'] is True:
+            return name, result
         if attempt < 2:
             time.sleep(10)
+    if result['ok'] is False:
+        opinion = corroborate(result.get('url', url), result.get('expected'))
+        result['evidence'] = opinion['detail']
+        if opinion['ok'] is not False:
+            result['ok'] = None
     return name, result
 
 
@@ -44,10 +43,27 @@ def transition(previous, readings, now):
     state.setdefault('pending', [])
     state.setdefault('next_id', 1)
     state.setdefault('candidates', {})
+    state.setdefault('candidate_since', {})
+    state.setdefault('last_failure_check', {})
     for name, reading in readings.items():
         old = state['services'].get(name)
-        count = 0 if reading['ok'] else min(2, state['candidates'].get(name, 0) + 1)
+        if reading['ok'] is None:
+            state['candidates'][name] = 0
+            state['candidate_since'].pop(name, None)
+            state['last_failure_check'].pop(name, None)
+            continue
+        last = state['last_failure_check'].get(name)
+        consecutive = last and 60 <= (now - datetime.datetime.fromisoformat(last)).total_seconds() <= 1800
+        count = 0 if reading['ok'] else min(2, (state['candidates'].get(name, 0) if consecutive else 0) + 1)
+        if not reading['ok']:
+            if not consecutive:
+                state['candidate_since'][name] = now.isoformat()
+            state['last_failure_check'][name] = now.isoformat()
+        else:
+            state['last_failure_check'].pop(name, None)
+            state['candidate_since'].pop(name, None)
         state['candidates'][name] = count
+        unseen_down = any(n.get('service') == name and n.get('kind') == 'down' and not n.get('delivered') for n in state['pending'])
         # Cancelar avisos de caída pendientes si la web ya responde.
         if reading['ok']:
             state['pending'] = [n for n in state['pending']
@@ -57,19 +73,21 @@ def transition(previous, readings, now):
         if old is None or old['ok'] != reading['ok']:
             message = None
             if not reading['ok']:
-                message = ('🔴 Vigilante externo · ' + name
-                           + ' no responde tras dos comprobaciones consecutivas desde GitHub, '
-                           'con tres intentos cada una.\n' + SITES[name])
-                if 'code' in reading:
-                    message += '\nHTTP ' + str(reading['code'])
-            elif old and not old['ok']:
+                started = state['candidate_since'].get(name, now.isoformat())
+                message = ('🔴 La web ' + name + ' está fallando.\n'
+                           + reading.get('error', 'No se puede acceder correctamente a la web.')
+                           + '\nLo observo desde: ' + datetime.datetime.fromisoformat(started).astimezone(ZoneInfo('Europe/Madrid')).strftime('%d/%m %H:%M')
+                           + '\nHe repetido las pruebas y también falla desde: '
+                           + reading.get('evidence', 'otras dos ubicaciones')
+                           + '\n' + SITES[name])
+            elif old and not old['ok'] and not unseen_down:
                 minutes = max(0, int((now - datetime.datetime.fromisoformat(old['since'])).total_seconds() // 60))
-                message = '✅ Vigilante externo · ' + name + ' vuelve a responder.\nDuración desde la confirmación: ' + str(minutes) + ' min.'
+                message = '✅ La web ' + name + ' vuelve a funcionar.\nDuración observada: ' + str(minutes) + ' min.'
             if message:
                 state['pending'].append({'id': state['next_id'], 'text': message,
                                          'service': name, 'kind': 'up' if reading['ok'] else 'down', 'delivered': []})
                 state['next_id'] += 1
-            state['services'][name] = {**reading, 'since': now.isoformat()}
+            state['services'][name] = {**reading, 'since': state['candidate_since'].get(name, now.isoformat()) if not reading['ok'] else now.isoformat()}
     # Una fecha antigua describe el monitor, nunca una caída del servidor.
     state['server_unreachable'] = False
     if previous.get('last_checked', '')[:10] != now.isoformat()[:10]:
@@ -157,7 +175,10 @@ def main():
         dirty = True
     if dirty:
         storage.save(state)
-    print('Comprobación externa finalizada:', sum(row['ok'] for row in readings.values()), '/', len(readings), 'webs disponibles.')
+    for name, reading in readings.items():
+        label = 'disponible' if reading['ok'] is True else 'fallo observado' if reading['ok'] is False else 'resultado sin confirmar'
+        print(name + ': ' + label + (' · ' + reading.get('evidence', reading.get('error', '')) if reading['ok'] is not True else ''))
+    print('Comprobación externa finalizada:', sum(row['ok'] is True for row in readings.values()), '/', len(readings), 'webs disponibles.')
     if failures:
         raise SystemExit('Quedan avisos pendientes; se reintentarán en la próxima ejecución.')
 
