@@ -18,5 +18,7 @@
   "candidates": {
     "MyCode": 0,
     "Daroka": 0
-  }
+  },
+  "candidate_since": {},
+  "last_failure_check": {}
 }
