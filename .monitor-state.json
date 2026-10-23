@@ -16,7 +16,8 @@
       "id": 1,
       "text": "✅ Vigilancia externa MyCode activada. MyCode y Daroka responden correctamente desde GitHub. Comprobaciones programadas cada cinco minutos; puede haber retrasos. Recibirás los avisos de caída y recuperación aunque este ordenador esté apagado.",
       "delivered": [
-        0
+        0,
+        1
       ]
     }
   ],
